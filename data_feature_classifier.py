@@ -19,8 +19,8 @@ def load_data(file_path):
 def preprocess_data(sample_metadata, auc_data):
     scaler = StandardScaler()
     
-    #columns_to_scale = ['injectionOrder', 'vol_O2', 'num_prelevement', 'cumul_O2']
-    #sample_metadata[columns_to_scale] = scaler.fit_transform(sample_metadata[columns_to_scale])
+    columns_to_scale = ['injectionOrder', 'vol_O2', 'num_prelevement', 'cumul_O2']
+    sample_metadata[columns_to_scale] = scaler.fit_transform(sample_metadata[columns_to_scale])
     
     y = sample_metadata['cumul_O2']
     X = auc_data.drop(columns=['name'])
