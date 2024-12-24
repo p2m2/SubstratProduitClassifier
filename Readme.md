@@ -16,32 +16,23 @@ Ce programme permet d'analyser des features issues de données expérimentales e
 ### Modèle Linéaire
 Le modèle linéaire peut être exprimé comme suit :
 
-$$
-Y = \beta_0 + \beta_1 X + \beta_2 \text{niveau\_o2} + \sum_{i=1}^{k} \beta_{i+2} \text{cultivar}_i + \sum_{j=1}^{m} \beta_{j+k+2} \text{repeat}_j + \sum_{l=1}^{n} \beta_{l+m+k+2} \text{batch}_l + \epsilon
-$$
-
+Y = β0 + β1 * X + β2 * niveau_o2 + Σ(βi * cultivar_i) + Σ(βj * repeat_j) + Σ(βk * batch_k) + ε
 
 ### Modèle Quadratique
 Le modèle quadratique est donné par :
 
-$$
-Y = \beta_0 + \beta_1 X + \beta_2 X^2 + \beta_3 \text{niveau\_o2} + \sum_{i=1}^{k} \beta_{i+3} \text{cultivar}_i + \sum_{j=1}^{m} \beta_{j+k+3} \text{repeat}_j + \sum_{l=1}^{n} \beta_{l+m+k+3} \text{batch}_l + \epsilon
-$$
-
+Y = β0 + β1 * X + β2 * X^2 + β3 * niveau_o2 + Σ(βi * cultivar_i) + Σ(βj * repeat_j) + Σ(βk * batch_k) + ε
 
 ### Modèle Cubique
 Le modèle cubique peut être formulé comme suit :
 
-$$
-Y = \beta_0 + \beta_1 X + \beta_2 X^2 + \beta_3 X^3 + \beta_4 \text{niveau\_o2} + \sum_{i=1}^{k} \beta_{i+4} \text{cultivar}_i + \sum_{j=1}^{m} \beta_{j+k+4} \text{repeat}_j + \sum_{l=1}^{n} \beta_{l+m+k+4} \text{batch}_l + \epsilon
-$$
-
+Y = β0 + β1 * X + β2 * X^2 + β3 * X^3 + β4 * niveau_o2 + Σ(βi * cultivar_i) + Σ(βj * repeat_j) + Σ(βk * batch_k) + ε
 
 ### Notations :
-- \( Y \) : variable dépendante (ex. cumul_O2)
-- \( X \) : variable indépendante (ex. feature d'intérêt)
-- \( k, m, n\) : nombres de niveaux pour chaque effet fixe respectif.
-- \( ϵ\) : terme d'erreur.
+- Y : variable dépendante (ex. cumul_O2)
+- X : variable indépendante (ex. feature d'intérêt)
+- β0, β1, β2, ... : coefficients du modèle
+- ε : terme d'erreur
 
 
 ```bash
