@@ -11,6 +11,48 @@ Ce programme permet d'analyser des features issues de données expérimentales e
 - Modèle de Régression Cubique (lm4) :
     - Ce modèle analyse les features recyclées, où l'abondance évolue selon un modèle plus complexe : abondance à t1 < t2 > t3 < t4, montrant des variations significatives au fil du temps.
 
+## Modèles Statistiques
+
+### Modèle Linéaire
+Le modèle linéaire peut être exprimé comme suit :
+
+$$
+Y = \beta_0 + \beta_1 X + \beta_2 \text{niveau\_o2} + \sum_{i=1}^{k} \beta_{i+2} \text{cultivar}_i + \sum_{j=1}^{m} \beta_{j+k+2} \text{repeat}_j + \sum_{l=1}^{n} \beta_{l+m+k+2} \text{batch}_l + \epsilon
+$$
+
+
+### Modèle Quadratique
+Le modèle quadratique est donné par :
+
+$$
+Y = \beta_0 + \beta_1 X + \beta_2 X^2 + \beta_3 \text{niveau\_o2} + \sum_{i=1}^{k} \beta_{i+3} \text{cultivar}_i + \sum_{j=1}^{m} \beta_{j+k+3} \text{repeat}_j + \sum_{l=1}^{n} \beta_{l+m+k+3} \text{batch}_l + \epsilon
+$$
+
+
+### Modèle Cubique
+Le modèle cubique peut être formulé comme suit :
+
+$$
+Y = \beta_0 + \beta_1 X + \beta_2 X^2 + \beta_3 X^3 + \beta_4 \text{niveau\_o2} + \sum_{i=1}^{k} \beta_{i+4} \text{cultivar}_i + \sum_{j=1}^{m} \beta_{j+k+4} \text{repeat}_j + \sum_{l=1}^{n} \beta_{l+m+k+4} \text{batch}_l + \epsilon
+$$
+
+
+### Notations :
+- \( Y \) : variable dépendante (ex. cumul_O2)
+- \( X \) : variable indépendante (ex. feature d'intérêt)
+- \( k, m, n\) : nombres de niveaux pour chaque effet fixe respectif.
+- \( ϵ\) : terme d'erreur.
+
+
+```bash
+                     Qualité des modèles                     
+                        ╷          ╷             ╷           
+  Métrique              │ Linéaire │ Quadratique │  Cubique  
+ ═══════════════════════╪══════════╪═════════════╪══════════ 
+  R² moyen              │   0.9979 │      0.9981 │   0.9982  
+  F-statistique moyenne │ 542.9776 │    554.8058 │ 558.2551  
+                        ╵          ╵             ╵           
+```
 
 ## Installation
 ### Prérequis
@@ -18,7 +60,7 @@ Ce programme permet d'analyser des features issues de données expérimentales e
 ```bash
 python -m venv env
 source env/bin/activate
-pip install pandas statsmodels scikit-learn tqdm colorama tabulate
+pip install pandas statsmodels scikit-learn tqdm colorama tabulate rich
 ```
 
 ## Exécution

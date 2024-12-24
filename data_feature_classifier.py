@@ -1,180 +1,316 @@
 import pandas as pd
-import statsmodels.api as sm
+import numpy as np
 from sklearn.preprocessing import StandardScaler
-from tqdm import tqdm
-from tabulate import tabulate
-from colorama import Fore, Style,init
+from statsmodels.api import add_constant, OLS
+from rich.console import Console
+from rich.table import Table
+from rich.progress import track
+from rich import box
 
-# Initialiser Colorama
-init(autoreset=True)
 
-# Charger le fichier Excel
-file_path = 'data-test/data_M2PHENOX_AD_v2.xlsx'
+# Initialiser la console Rich
+console = Console()
 
-# Charger les données
-sample_metadata = pd.read_excel(file_path, sheet_name='sample_metadata')
-auc_data = pd.read_excel(file_path, sheet_name='AUC_data')
+def load_data(file_path):
+    sample_metadata = pd.read_excel(file_path, sheet_name='sample_metadata')
+    auc_data = pd.read_excel(file_path, sheet_name='AUC_data')
+    return sample_metadata, auc_data
 
-# Extraire les données nécessaires
-
-features_names = auc_data['name']
-cultivar_Y = sample_metadata['cultivar']
-repetition_Y = sample_metadata['repeat']
-unique_cultivars = cultivar_Y.unique()
-unique_repetitions = repetition_Y.unique()
-
-scaler = StandardScaler()
-
-sample_metadata[['injectionOrder', 'vol_O2', 'num_prelevement','cumul_O2']] = scaler.fit_transform(
-    sample_metadata[['injectionOrder', 'vol_O2', 'num_prelevement','cumul_O2']]
-)
-
-y = sample_metadata['cumul_O2']
-
-# Préparer les échantillons (X)
-samples = auc_data.drop(columns=['name'])
-
-samples_normalized = scaler.fit_transform(samples)
-
-# Dictionnaire pour stocker les résultats par feature
-results = []
-
-# Modèle de régression linéaire avec pente positive
-for index in tqdm(range(samples_normalized.shape[0]), desc="Analyse des lignes"):
-    # Extraire les données pour la feature actuelle
-    X_feature = samples_normalized[index]
+def preprocess_data(sample_metadata, auc_data):
+    scaler = StandardScaler()
     
-    # Créer le DataFrame avec les données nécessaires
-    data = pd.DataFrame(
-        {
-            'x': X_feature,
-            'y': sample_metadata['cumul_O2'],
-            # covariate
-            'injectionOrder' : sample_metadata['injectionOrder'],
-            #'vol_O2' : sample_metadata['vol_O2'],
-            #'num_prelevement' : sample_metadata['num_prelevement'],
-            # effet fixes
-            'batch' : sample_metadata['batch'],
-            'cultivar': [c.strip() for c in sample_metadata['cultivar']],
-            'repeat': sample_metadata['repeat'],
-            #'kinetic': sample_metadata['kinetic']
-        }
-    )
+    #columns_to_scale = ['injectionOrder', 'vol_O2', 'num_prelevement', 'cumul_O2']
+    #sample_metadata[columns_to_scale] = scaler.fit_transform(sample_metadata[columns_to_scale])
     
-    y = data['y']
+    y = sample_metadata['cumul_O2']
+    X = auc_data.drop(columns=['name'])
+    X_normalized = scaler.fit_transform(X)
     
-    # Ajouter des variables indicatrices (dummies)
-    data = pd.get_dummies(data, columns=['cultivar', 'repeat', 'batch'], drop_first=True)
+    return X_normalized, y, sample_metadata
+
+def create_model_data(X_feature, sample_metadata):
+    data = pd.DataFrame({
+        'x': X_feature,
+        'y': sample_metadata['cumul_O2'],
+        'injectionOrder': sample_metadata['injectionOrder'],
+        'niveau_o2': sample_metadata['vol_O2'],
+        'batch': sample_metadata['batch'],
+        'cultivar': sample_metadata['cultivar'].str.strip(),
+        'repeat': sample_metadata['repeat'],
+        'num_prelevement': sample_metadata['num_prelevement']
+    })
     
-    # Utiliser filter pour obtenir les colonnes contenant les motifs souhaités
-    val_dummies_fix = data.filter(regex='^(cultivar_|repeat_|batch_)').columns.tolist()
+    data = pd.get_dummies(data, columns=['cultivar', 'repeat', 'batch', 'num_prelevement'], drop_first=True)
     
+    val_dummies_fix = data.filter(regex='^(cultivar_|repeat_|batch_|num_prelevement_)').columns.tolist()
     data[val_dummies_fix] = data[val_dummies_fix].astype(int)
     
     # Inclure injectionOrder comme covariable dans tous les modèles
-    # vol_O2 et num_prelevement sont des covariables potentielles => 
-    covariates = ['injectionOrder' ] + val_dummies_fix
+    # InjectionOrder sont des covariables potentielles => 
     
-    # Modèle linéaire avec pente positive
-    X = data[['x'] + covariates]
-    X = sm.add_constant(X)
-
-    # Vérifier les valeurs manquantes avant d'ajuster le modèle
-    if X.isnull().any().any() or y.isnull().any():
-        print(f"Valeurs manquantes détectées à l'index {index}.")
-        continue  # Passer à l'itération suivante si des valeurs manquantes sont trouvées
-
-    model_lin = sm.OLS(y, X).fit()
-    pvalue_lin = model_lin.pvalues.get('x', None)
-    slope_linear = model_lin.params['x']
-    # Coefficient de détermination
-    r_squared = model_lin.rsquared
-    # Statistique F
-    f_statistic = model_lin.fvalue
-    # Intervalle de confiance
-    conf_int = model_lin.conf_int().loc['x'].tolist()
+    # 'InjectionOrder' => R² moyen              │   0.6055 │      0.6375 │  0.6611
+    # 'niveau_o2' => R² moyen              │    0.9972 │      0.9974 │    0.9975
+    covariates = ['niveau_o2' ] + val_dummies_fix
     
-    # Ajouter le terme quadratique (x^2)
+    
+    return data, covariates
+
+def fit_models(data, y, covariates):
+    X = add_constant(data[['x'] + covariates])
+    model_lin = OLS(y, X).fit()
+    
     data['x_squared'] = data['x'] ** 2
-    X_quad = data[['x', 'x_squared'] + covariates]
-    X_quad = sm.add_constant(X_quad)
+    X_quad = add_constant(data[['x', 'x_squared'] + covariates])
+    model_quad = OLS(y, X_quad).fit()
     
-    model_quad = sm.OLS(y, X_quad).fit()
-    pvalue_quad = model_quad.pvalues.get('x_squared', None)
-    slope_quad = model_quad.params['x_squared']
-    r_squared_quad = model_quad.rsquared
-    f_statistic_quad = model_quad.fvalue
-    conf_int_quad = model_quad.conf_int().loc['x_squared'].tolist()
-    
-    # Ajouter le terme cubique (x^3)
     data['x_cubed'] = data['x'] ** 3
-    X_cubic = data[['x', 'x_squared', 'x_cubed'] + covariates]
-    X_cubic = sm.add_constant(X_cubic)
+    X_cubic = add_constant(data[['x', 'x_squared', 'x_cubed'] + covariates])
+    model_cubic = OLS(y, X_cubic).fit()
     
-    model_cubic = sm.OLS(y, X_cubic).fit()
-    pvalue_cubic = model_cubic.pvalues.get('x_cubed', None)
-    slope_cubic = model_cubic.params['x_cubed']
-    r_squared_cubic = model_cubic.rsquared
-    f_statistic_cubic = model_cubic.fvalue
-    conf_int_cubic = model_cubic.conf_int().loc['x_cubed'].tolist()
-     
-    # Stocker les résultats pour la feature actuelle
-    results.append({
-        'Feature': features_names[index],
-        'P-value_linear': pvalue_lin,
-        'Pente_linear': slope_linear,
-        'R2_linear': r_squared,
-        'F-statistic_linear': f_statistic,
-        'Confidence_interval_linear': conf_int,
-        'P-value_quadratic': pvalue_quad,
-        'Pente_quadratic': slope_quad,
-        'R2_quadratic': r_squared_quad,
-        'F-statistic_quadratic': f_statistic_quad,
-        'Confidence_interval_quadratic': conf_int_quad,
-        'P-value_cubic': pvalue_cubic,
-        'Pente_cubic': slope_cubic,
-        'R2_cubic': r_squared_cubic,
-        'F-statistic_cubic': f_statistic_cubic,
-    })
+    return model_lin, model_quad, model_cubic
+
+def analyze_feature(X_feature, y, sample_metadata, feature_name):
+    data, covariates = create_model_data(X_feature, sample_metadata)
+    model_lin, model_quad, model_cubic = fit_models(data, y, covariates)
+    
+    return {
+        'Feature': feature_name,
+        'P-value_linear': model_lin.pvalues.get('x', None),
+        'Pente_linear': model_lin.params['x'],
+        'R2_linear': model_lin.rsquared,
+        'F-statistic_linear': model_lin.fvalue,
+        'Confidence_interval_linear': model_lin.conf_int().loc['x'].tolist(),
+        'P-value_quadratic': model_quad.pvalues.get('x_squared', None),
+        'Pente_quadratic': model_quad.params['x_squared'],
+        'R2_quadratic': model_quad.rsquared,
+        'F-statistic_quadratic': model_quad.fvalue,
+        'Confidence_interval_quadratic': model_quad.conf_int().loc['x_squared'].tolist(),
+        'P-value_cubic': model_cubic.pvalues.get('x_cubed', None),
+        'Pente_cubic': model_cubic.params['x_cubed'],
+        'R2_cubic': model_cubic.rsquared,
+        'F-statistic_cubic': model_cubic.fvalue,
+    }
 
 def get_type_feature(res):
-    out =""
-    if res['P-value_linear'] < 0.05 and res['Pente_linear']>0:
-        out += 'Produit,'
-    if res['P-value_linear'] < 0.05 and res['Pente_linear']<0:
-        out += 'Substrat,'
-    if res['P-value_quadratic'] < 0.05:
-        out += 'Transitoire,'
-    if res['P-value_cubic'] < 0.05:
-        out += 'Recyclé,'
+    types = []
+    if res['P-value_linear'] < 0.05:
+        types.append('Produit' if res['Pente_linear'] > 0 else 'Substrat')
+    if res['P-value_quadratic'] < 0.05 and res['Pente_quadratic'] > 0 :
+        types.append('Transitoire')
+    if res['P-value_cubic'] < 0.05 and res['Pente_cubic'] > 0:
+        types.append('Recyclé')
+    return ','.join(types) if types else 'Non classé'
+
+def analyze_data(X_normalized, y, sample_metadata, feature_names):
+    results = []
+    for index in track(range(X_normalized.shape[0]), description="Analysing features"):
+        result = analyze_feature(X_normalized[index], y, sample_metadata, feature_names[index])
+        result['Type'] = get_type_feature(result)
+        results.append(result)
+    return results
+
+def save_results(results):
+    pd.DataFrame(results).to_csv('Features_Results.csv', index=False, float_format="%.5f")
+    pd.DataFrame({'Res': [x['Type'] for x in results]}).to_csv('Features_Results_Type.csv', index=False)
+
+def categorize_results(results):
+    categories = {
+        'produits': [x['Feature'] for x in results if 'Produit' in x['Type']],
+        'substrats': [x['Feature'] for x in results if 'Substrat' in x['Type']],
+        'transitoires': [x['Feature'] for x in results if 'Transitoire' in x['Type']],
+        'recycles': [x['Feature'] for x in results if 'Recyclé' in x['Type']],
+        'non_classes': [x['Feature'] for x in results if x['Type'] == 'Non classé'],
+        'Total': [x['Feature'] for x in results]
+    }
+    exclusive_categories = {
+        'produits_exc': [x['Feature'] for x in results if x['Type'] == 'Produit'],
+        'substrats_exc': [x['Feature'] for x in results if x['Type'] == 'Substrat'],
+        'transitoires_exc': [x['Feature'] for x in results if x['Type'] == 'Transitoire'],
+        'recycles_exc': [x['Feature'] for x in results if x['Type'] == 'Recyclé'],
+        'non_classes': [x['Feature'] for x in results if x['Type'] == 'Non classé'],
+        'Total': [x['Feature'] for x in results if x['Type'].count(',') == 0]
+    }
+    return categories, exclusive_categories
+
+def create_summary_table(categories, exclusive_categories):
+    table = Table(title="Résumé des Résultats")
+    table.add_column("Catégorie", style="cyan")
+    table.add_column("Éligible", justify="right")
+    table.add_column("Exclusif (1 seule catégorie)", justify="right")
     
-    return out[:-1]
+    for cat, exc_cat in zip(categories.items(), exclusive_categories.items()):
+        table.add_row(cat[0].capitalize(), str(len(cat[1])), str(len(exc_cat[1])))
+    
+    return table
 
-# Sauvegarder dans un fichier CSV avec formatage des p-values
-results = [{**x, 'Type': get_type_feature(x)} for x in results]
-pd.DataFrame(results).to_csv('Features_Results.csv', index=False, float_format="%.5f")
-pd.DataFrame({'Res': [x['Type'] for x in results]}).to_csv('Features_Results_Type.csv', index=False)
+def create_2d_table(categories, exclusive_categories):
+    cat_names = ["Produit", "Substrat", "Transitoire", "Recyclé"]
+    cat_keys = ["produits", "substrats", "transitoires", "recycles"]  # Notez "recycles" au lieu de "recyclés"
+    table_2d = np.zeros((4, 4), dtype=int)
+    
+    for i, (cat1, key1) in enumerate(zip(cat_names, cat_keys)):
+        for j, (cat2, key2) in enumerate(zip(cat_names, cat_keys)):
+            if i == j:
+                table_2d[i][j] = len(exclusive_categories[f"{key1}_exc"])
+            else:
+                set1 = set(categories[key1])
+                set2 = set(categories[key2])
+                table_2d[i][j] = len(set1.intersection(set2))
+    
+    table = Table(title="Tableau 2D des catégories")
+    table.add_column("Catégorie", style="cyan")
+    for cat in cat_names:
+        table.add_column(cat, justify="right")
+    
+    for i, cat in enumerate(cat_names):
+        table.add_row(cat, *[str(x) for x in table_2d[i]])
+    
+    return table
 
-# Filtrer les résultats par catégorie
-produits = [x['Feature'] for x in results if x['P-value_linear'] < 0.05 and x['Pente_linear'] > 0]
-produits_exc = [x['Feature'] for x in results if x['P-value_linear'] < 0.05 and x['Pente_linear'] > 0 and x['P-value_quadratic'] >= 0.05 and x['P-value_cubic'] >= 0.05]
-substrats = [x['Feature'] for x in results if x['P-value_linear'] < 0.05 and x['Pente_linear'] < 0]
-substrats_exc = [x['Feature'] for x in results if x['P-value_linear'] < 0.05 and x['Pente_linear'] < 0 and x['P-value_quadratic'] >= 0.05 and x['P-value_cubic'] >= 0.05]
-transitoires = [x['Feature'] for x in results if x['P-value_quadratic'] < 0.05]
-transitoires_exc = [x['Feature'] for x in results if x['P-value_quadratic'] < 0.05 and x['P-value_linear'] >= 0.05 and x['P-value_cubic'] >= 0.05]
-recycles = [x['Feature'] for x in results if x['P-value_cubic'] < 0.05]
-recycles_exc = [x['Feature'] for x in results if x['P-value_cubic'] < 0.05 and x['P-value_linear'] >= 0.05 and x['P-value_quadratic'] >= 0.05]
-non_classes = [x['Feature'] for x in results if x['P-value_cubic'] >= 0.05 and x['P-value_quadratic'] >= 0.05 and x['P-value_linear'] >= 0.05]
+def create_slopes_table(results, categories):
+    cat_names = ["Produit", "Substrat", "Transitoire", "Recyclé"]
+    cat_keys = ["produits", "substrats", "transitoires", "recycles"]
+    table_slopes = np.zeros((6, 4), dtype=int)
+    
+    for i, (category, key) in enumerate(zip(cat_names, cat_keys)):
+        category_list = categories[key]
+        
+        # Pentes linéaires
+        positive_lin = sum(1 for x in results if x['Feature'] in category_list and x['Pente_linear'] > 0 and x['P-value_linear'] < 0.05)
+        negative_lin = sum(1 for x in results if x['Feature'] in category_list and x['Pente_linear'] < 0 and x['P-value_linear'] < 0.05)
+        
+        # Pentes quadratiques
+        positive_quad = sum(1 for x in results if x['Feature'] in category_list and x['Pente_quadratic'] > 0 and x['P-value_quadratic'] < 0.05)
+        negative_quad = sum(1 for x in results if x['Feature'] in category_list and x['Pente_quadratic'] < 0 and x['P-value_quadratic'] < 0.05)
+        
+        # Pentes cubiques
+        positive_cub = sum(1 for x in results if x['Feature'] in category_list and x['Pente_cubic'] > 0 and x['P-value_cubic'] < 0.05)
+        negative_cub = sum(1 for x in results if x['Feature'] in category_list and x['Pente_cubic'] < 0 and x['P-value_cubic'] < 0.05)
+        
+        table_slopes[:, i] = [positive_lin, negative_lin, positive_quad, negative_quad, positive_cub, negative_cub]
+    
+    table = Table(title="Tableau des pentes (avec p-value<0.05 associée) par catégorie")
+    table.add_column("Pente", style="cyan")
+    for cat in cat_names:
+        table.add_column(cat, justify="right")
+    
+    table.add_row("Linéaire Positive", *[str(x) for x in table_slopes[0]])
+    table.add_row("Linéaire Négative", *[str(x) for x in table_slopes[1]])
+    table.add_row("Quadratique Positive", *[str(x) for x in table_slopes[2]])
+    table.add_row("Quadratique Négative", *[str(x) for x in table_slopes[3]])
+    table.add_row("Cubique Positive", *[str(x) for x in table_slopes[4]])
+    table.add_row("Cubique Négative", *[str(x) for x in table_slopes[5]])
+    
+    return table
 
-# Créer un tableau des résultats
-table_data = [
-    [f"{Fore.GREEN}Produits{Style.RESET_ALL}", len(produits), len(produits_exc)],
-    [f"{Fore.RED}Substrats{Style.RESET_ALL}", len(substrats), len(substrats_exc)],
-    [f"{Fore.YELLOW}Transitoires{Style.RESET_ALL}", len(transitoires),len(transitoires_exc)],
-    [f"{Fore.BLUE}Recyclés{Style.RESET_ALL}", len(recycles), len(recycles_exc)],
-    [f"{Fore.WHITE}Non classés{Style.RESET_ALL}", len(non_classes),len(results)-len(produits_exc)-len(substrats_exc)-len(transitoires_exc)-len(recycles_exc)],
-]
+def analyze_slopes(results):
+    slopes = {
+        'linear': [r['Pente_linear'] for r in results],
+        'quadratic': [r['Pente_quadratic'] for r in results],
+        'cubic': [r['Pente_cubic'] for r in results]
+    }
+    
+    table = Table(title="Distribution des valeurs de pente", box=box.MINIMAL_DOUBLE_HEAD)
+    table.add_column("Statistique", style="cyan")
+    table.add_column("Linéaire", justify="right")
+    table.add_column("Quadratique", justify="right")
+    table.add_column("Cubique", justify="right")
+    
+    for stat in ['Min', 'Max', 'Moyenne', 'Médiane']:
+        row = [stat]
+        for slope_type in ['linear', 'quadratic', 'cubic']:
+            if stat == 'Min':
+                value = min(slopes[slope_type])
+            elif stat == 'Max':
+                value = max(slopes[slope_type])
+            elif stat == 'Moyenne':
+                value = np.mean(slopes[slope_type])
+            else:  # Médiane
+                value = np.median(slopes[slope_type])
+            row.append(f"{value:.4f}")
+        table.add_row(*row)
+    
+    console.print(table)
 
-# Afficher le tableau
-print(f"\n{Style.BRIGHT}{Fore.CYAN}Résumé des Résultats :\n")
-print(tabulate(table_data, headers=["Catégorie", "Éligible", "Exclusif (1 seule catégorie)"], tablefmt="grid"))
+def analyze_model_quality(results):
+    r_squared = {
+        'linear': [r['R2_linear'] for r in results],
+        'quadratic': [r['R2_quadratic'] for r in results],
+        'cubic': [r['R2_cubic'] for r in results]
+    }
+    f_statistic = {
+        'linear': [r['F-statistic_linear'] for r in results],
+        'quadratic': [r['F-statistic_quadratic'] for r in results],
+        'cubic': [r['F-statistic_cubic'] for r in results]
+    }
+    
+    table = Table(title="Qualité des modèles", box=box.MINIMAL_DOUBLE_HEAD)
+    table.add_column("Métrique", style="cyan")
+    table.add_column("Linéaire", justify="right")
+    table.add_column("Quadratique", justify="right")
+    table.add_column("Cubique", justify="right")
+    
+    table.add_row("R² moyen", 
+                  f"{np.mean(r_squared['linear']):.4f}",
+                  f"{np.mean(r_squared['quadratic']):.4f}",
+                  f"{np.mean(r_squared['cubic']):.4f}")
+    
+    table.add_row("F-statistique moyenne", 
+                  f"{np.mean(f_statistic['linear']):.4f}",
+                  f"{np.mean(f_statistic['quadratic']):.4f}",
+                  f"{np.mean(f_statistic['cubic']):.4f}")
+    
+    console.print(table)
+
+def correlation_matrix(results, feature_names,X_normalized):
+    # Sélectionner les features les plus significatives (par exemple, top 10 avec le R² le plus élevé)
+    top_features = sorted(results, key=lambda x: x['R2_linear'], reverse=True)[:10]
+    feature_names_list = feature_names.tolist() if hasattr(feature_names, 'tolist') else feature_names
+    
+    # Créer un DataFrame avec les valeurs de ces features
+    df = pd.DataFrame({r['Feature']: X_normalized[feature_names_list.index(r['Feature'],)] for r in top_features})
+    
+    # Calculer la matrice de corrélation
+    corr_matrix = df.corr()
+    
+    # Afficher la matrice de corrélation
+    table = Table(title="Matrice de corrélation des features les plus significatives", box=box.MINIMAL_DOUBLE_HEAD)
+    table.add_column("Feature", style="cyan")
+    for feature in corr_matrix.columns:
+        table.add_column(feature, justify="right")
+    
+    for feature, row in corr_matrix.iterrows():
+        table.add_row(feature, *[f"{val:.2f}" for val in row])
+    
+    console.print(table)
+
+# Dans votre fonction main ou là où vous traitez vos résultats :
+def display_global_analysis(results, feature_names,X_normalized):
+    console.print("[bold]Analyse globale des features[/bold]\n")
+    
+    analyze_slopes(results)
+    console.print()
+    
+    analyze_model_quality(results)
+    console.print()
+    
+    correlation_matrix(results, feature_names,X_normalized)
+
+
+def main():
+    file_path = 'data-test/data_M2PHENOX_AD_v2.xlsx'
+    sample_metadata, auc_data = load_data(file_path)
+    X_normalized, y, sample_metadata = preprocess_data(sample_metadata, auc_data)
+    results = analyze_data(X_normalized, y, sample_metadata, auc_data['name'])
+    save_results(results)
+    
+    categories, exclusive_categories = categorize_results(results)
+    
+    console.print(create_summary_table(categories, exclusive_categories))
+    console.print(create_2d_table(categories, exclusive_categories))
+    console.print(create_slopes_table(results, categories))
+    # Appelez cette fonction avec vos résultats
+    display_global_analysis(results,auc_data['name'],X_normalized)
+
+if __name__ == "__main__":
+    main()
