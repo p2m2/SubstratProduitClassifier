@@ -34,32 +34,25 @@ def preprocess_data(sample_metadata, auc_data):
     
     return X_normalized, y, sample_metadata
 
-def create_model_data(X_feature, sample_metadata):
+def create_model_data(X_feature, sample_metadata, fixed_effects, covariates):
     data = pd.DataFrame({
         'x': X_feature,
         'y': sample_metadata['cumul_O2'],
-        'injectionOrder': sample_metadata['injectionOrder'],
-        'niveau_o2': sample_metadata['vol_O2'],
-        'batch': sample_metadata['batch'],
-        'cultivar': sample_metadata['cultivar'].str.strip(),
-        'repeat': sample_metadata['repeat'],
-        'num_prelevement': sample_metadata['num_prelevement']
     })
     
-    data = pd.get_dummies(data, columns=['cultivar', 'repeat', 'batch', 'num_prelevement'], drop_first=True)
+    for effect in fixed_effects:
+        data[effect] = sample_metadata[effect]
     
-    val_dummies_fix = data.filter(regex='^(cultivar_|repeat_|batch_|num_prelevement_)').columns.tolist()
+    data = pd.get_dummies(data, columns=fixed_effects, drop_first=True)
+    
+    for covariate in covariates:
+        data[covariate] = sample_metadata[covariate]
+    
+    val_dummies_fix = data.filter(regex='^(' + '|'.join(fixed_effects) + '_)').columns.tolist()
     data[val_dummies_fix] = data[val_dummies_fix].astype(int)
     
-    # Inclure injectionOrder comme covariable dans tous les modèles
-    # InjectionOrder sont des covariables potentielles => 
-    
-    # 'InjectionOrder' => R² moyen              │   0.6055 │      0.6375 │  0.6611
-    # 'niveau_o2' => R² moyen              │    0.9972 │      0.9974 │    0.9975
-    covariates = ['niveau_o2' ] + val_dummies_fix
-    
-    
-    return data, covariates
+    return data, val_dummies_fix + covariates
+
 
 def fit_models(data, y, covariates):
     X = add_constant(data[['x'] + covariates])
@@ -318,7 +311,7 @@ def display_global_analysis(results, feature_names,X_normalized):
     
     correlation_matrix(results, feature_names,X_normalized)
 
-def generate_html_report(results, categories, exclusive_categories, X_normalized, feature_names):
+def generate_html_report(results, categories, exclusive_categories, X_normalized, feature_names, models):
     env = Environment(loader=FileSystemLoader('.'))
     env.filters['mean'] = lambda x: np.mean(x)
     env.filters['median'] = lambda x: np.median(x)
@@ -349,7 +342,8 @@ def generate_html_report(results, categories, exclusive_categories, X_normalized
         slopes_table=table_to_html(slopes_table),
         slopes_data=slopes_data,
         model_quality_data=model_quality_data,
-        correlation_data=correlation_data
+        correlation_data=correlation_data,
+        models=models
     )
 
     with open('report.html', 'w', encoding='utf-8') as f:
@@ -363,6 +357,15 @@ def main():
     file_path = 'data-test/data_M2PHENOX_AD_v2.xlsx'
     sample_metadata, auc_data = load_data(file_path)
     X_normalized, y, sample_metadata = preprocess_data(sample_metadata, auc_data)
+    
+    models = [
+        {'fixed_effects': ['cultivar', 'repeat', 'batch'], 'covariates': ['injectionOrder']},
+        {'fixed_effects': ['cultivar', 'repeat', 'batch','num_prelevement'], 'covariates': ['injectionOrder']},
+        {'fixed_effects': ['cultivar', 'repeat', 'batch'], 'covariates': ['niveau_o2']},
+        {'fixed_effects': ['cultivar', 'repeat'], 'covariates': ['injectionOrder', 'niveau_o2', 'num_prelevement']},
+        # Ajoutez d'autres modèles selon vos besoins
+    ]
+    
     results = analyze_data(X_normalized, y, sample_metadata, auc_data['name'])
     save_results(results)
     

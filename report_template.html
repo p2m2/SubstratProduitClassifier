@@ -10,77 +10,89 @@
         table { border-collapse: collapse; width: 100%; margin-bottom: 20px; }
         th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
         th { background-color: #f2f2f2; }
+        .page-break { page-break-before: always; }
     </style>
 </head>
 <body>
-    <h1>Rapport d'analyse des features</h1>
-    <p>Généré le : {{ date }}</p>
+    {% for model in models %}
+    <div class="page-break">
+        <h1>Rapport d'analyse des features - Modèle {{ loop.index }}</h1>
+        <p>Généré le : {{ date }}</p>
 
-    <h2>Résumé des Résultats</h2>
-    {{ summary_table|safe }}
+        <h2>Modèle</h2>
+        <p><strong>Effets fixes :</strong> {{ model.fixed_effects|join(', ') }}</p>
+        <p><strong>Covariables :</strong> {{ model.covariates|join(', ') }}</p>
 
-    <h2>Tableau 2D des catégories</h2>
-    {{ table_2d|safe }}
+        <h1>Rapport d'analyse des features</h1>
+        <p>Généré le : {{ date }}</p>
 
-    <h2>Tableau des pentes par catégorie</h2>
-    {{ slopes_table|safe }}
+        <h2>Résumé des Résultats</h2>
+        {{ summary_table|safe }}
 
-    <h2>Distribution des valeurs de pente</h2>
-    <table>
-        <tr>
-            <th>Statistique</th>
-            <th>Linéaire</th>
-            <th>Quadratique</th>
-            <th>Cubique</th>
-        </tr>
-        {% for stat in ['Min', 'Max', 'Moyenne', 'Médiane'] %}
-        <tr>
-            <td>{{ stat }}</td>
-            <td>{{ '%.4f'|format(slopes_data['linear']|min if stat == 'Min' else slopes_data['linear']|max if stat == 'Max' else slopes_data['linear']|mean if stat == 'Moyenne' else slopes_data['linear']|median) }}</td>
-            <td>{{ '%.4f'|format(slopes_data['quadratic']|min if stat == 'Min' else slopes_data['quadratic']|max if stat == 'Max' else slopes_data['quadratic']|mean if stat == 'Moyenne' else slopes_data['quadratic']|median) }}</td>
-            <td>{{ '%.4f'|format(slopes_data['cubic']|min if stat == 'Min' else slopes_data['cubic']|max if stat == 'Max' else slopes_data['cubic']|mean if stat == 'Moyenne' else slopes_data['cubic']|median) }}</td>
-        </tr>
-        {% endfor %}
-    </table>
+        <h2>Tableau 2D des catégories</h2>
+        {{ table_2d|safe }}
 
-    <h2>Qualité des modèles</h2>
-    <table>
-        <tr>
-            <th>Métrique</th>
-            <th>Linéaire</th>
-            <th>Quadratique</th>
-            <th>Cubique</th>
-        </tr>
-        <tr>
-            <td>R² moyen</td>
-            <td>{{ '%.4f'|format(model_quality_data['r_squared']['linear']|mean) }}</td>
-            <td>{{ '%.4f'|format(model_quality_data['r_squared']['quadratic']|mean) }}</td>
-            <td>{{ '%.4f'|format(model_quality_data['r_squared']['cubic']|mean) }}</td>
-        </tr>
-        <tr>
-            <td>F-statistique moyenne</td>
-            <td>{{ '%.4f'|format(model_quality_data['f_statistic']['linear']|mean) }}</td>
-            <td>{{ '%.4f'|format(model_quality_data['f_statistic']['quadratic']|mean) }}</td>
-            <td>{{ '%.4f'|format(model_quality_data['f_statistic']['cubic']|mean) }}</td>
-        </tr>
-    </table>
+        <h2>Tableau des pentes par catégorie</h2>
+        {{ slopes_table|safe }}
 
-    <h2>Matrice de corrélation des features les plus significatives</h2>
-    <table>
-        <tr>
-            <th>Feature</th>
-            {% for feature in correlation_data.keys() %}
-            <th>{{ feature }}</th>
+        <h2>Distribution des valeurs de pente</h2>
+        <table>
+            <tr>
+                <th>Statistique</th>
+                <th>Linéaire</th>
+                <th>Quadratique</th>
+                <th>Cubique</th>
+            </tr>
+            {% for stat in ['Min', 'Max', 'Moyenne', 'Médiane'] %}
+            <tr>
+                <td>{{ stat }}</td>
+                <td>{{ '%.4f'|format(slopes_data['linear']|min if stat == 'Min' else slopes_data['linear']|max if stat == 'Max' else slopes_data['linear']|mean if stat == 'Moyenne' else slopes_data['linear']|median) }}</td>
+                <td>{{ '%.4f'|format(slopes_data['quadratic']|min if stat == 'Min' else slopes_data['quadratic']|max if stat == 'Max' else slopes_data['quadratic']|mean if stat == 'Moyenne' else slopes_data['quadratic']|median) }}</td>
+                <td>{{ '%.4f'|format(slopes_data['cubic']|min if stat == 'Min' else slopes_data['cubic']|max if stat == 'Max' else slopes_data['cubic']|mean if stat == 'Moyenne' else slopes_data['cubic']|median) }}</td>
+            </tr>
             {% endfor %}
-        </tr>
-        {% for feature, values in correlation_data.items() %}
-        <tr>
-            <td>{{ feature }}</td>
-            {% for value in values.values() %}
-            <td>{{ '%.2f'|format(value) }}</td>
+        </table>
+
+        <h2>Qualité des modèles</h2>
+        <table>
+            <tr>
+                <th>Métrique</th>
+                <th>Linéaire</th>
+                <th>Quadratique</th>
+                <th>Cubique</th>
+            </tr>
+            <tr>
+                <td>R² moyen</td>
+                <td>{{ '%.4f'|format(model_quality_data['r_squared']['linear']|mean) }}</td>
+                <td>{{ '%.4f'|format(model_quality_data['r_squared']['quadratic']|mean) }}</td>
+                <td>{{ '%.4f'|format(model_quality_data['r_squared']['cubic']|mean) }}</td>
+            </tr>
+            <tr>
+                <td>F-statistique moyenne</td>
+                <td>{{ '%.4f'|format(model_quality_data['f_statistic']['linear']|mean) }}</td>
+                <td>{{ '%.4f'|format(model_quality_data['f_statistic']['quadratic']|mean) }}</td>
+                <td>{{ '%.4f'|format(model_quality_data['f_statistic']['cubic']|mean) }}</td>
+            </tr>
+        </table>
+
+        <h2>Matrice de corrélation des features les plus significatives</h2>
+        <table>
+            <tr>
+                <th>Feature</th>
+                {% for feature in correlation_data.keys() %}
+                <th>{{ feature }}</th>
+                {% endfor %}
+            </tr>
+            {% for feature, values in correlation_data.items() %}
+            <tr>
+                <td>{{ feature }}</td>
+                {% for value in values.values() %}
+                <td>{{ '%.2f'|format(value) }}</td>
+                {% endfor %}
+            </tr>
             {% endfor %}
-        </tr>
-        {% endfor %}
-    </table>
+        </table>
+    </div>
+    {% endfor %}
 </body>
 </html>
