@@ -1,11 +1,17 @@
 import pandas as pd
 import numpy as np
+from numpy import median
 from sklearn.preprocessing import StandardScaler
 from statsmodels.api import add_constant, OLS
 from rich.console import Console
 from rich.table import Table
 from rich.progress import track
 from rich import box
+from jinja2 import Environment, FileSystemLoader
+import os
+from datetime import datetime
+from rich.console import Console
+from io import StringIO
 
 
 # Initialiser la console Rich
@@ -203,7 +209,7 @@ def create_slopes_table(results, categories):
     
     return table
 
-def analyze_slopes(results):
+def analyze_slopes(results,return_data=False):
     slopes = {
         'linear': [r['Pente_linear'] for r in results],
         'quadratic': [r['Pente_quadratic'] for r in results],
@@ -230,9 +236,16 @@ def analyze_slopes(results):
             row.append(f"{value:.4f}")
         table.add_row(*row)
     
+    if return_data:
+        return {
+            'linear': slopes['linear'],
+            'quadratic': slopes['quadratic'],
+            'cubic': slopes['cubic']
+        }
+    
     console.print(table)
 
-def analyze_model_quality(results):
+def analyze_model_quality(results, return_data=False):
     r_squared = {
         'linear': [r['R2_linear'] for r in results],
         'quadratic': [r['R2_quadratic'] for r in results],
@@ -260,9 +273,15 @@ def analyze_model_quality(results):
                   f"{np.mean(f_statistic['quadratic']):.4f}",
                   f"{np.mean(f_statistic['cubic']):.4f}")
     
+    if return_data:
+        return {
+            'r_squared': r_squared,
+            'f_statistic': f_statistic
+        }
+        
     console.print(table)
 
-def correlation_matrix(results, feature_names,X_normalized):
+def correlation_matrix(results, feature_names,X_normalized,return_data=False):
     # Sélectionner les features les plus significatives (par exemple, top 10 avec le R² le plus élevé)
     top_features = sorted(results, key=lambda x: x['R2_linear'], reverse=True)[:10]
     feature_names_list = feature_names.tolist() if hasattr(feature_names, 'tolist') else feature_names
@@ -282,6 +301,9 @@ def correlation_matrix(results, feature_names,X_normalized):
     for feature, row in corr_matrix.iterrows():
         table.add_row(feature, *[f"{val:.2f}" for val in row])
     
+    if return_data:
+        return corr_matrix.to_dict()
+    
     console.print(table)
 
 # Dans votre fonction main ou là où vous traitez vos résultats :
@@ -295,6 +317,46 @@ def display_global_analysis(results, feature_names,X_normalized):
     console.print()
     
     correlation_matrix(results, feature_names,X_normalized)
+
+def generate_html_report(results, categories, exclusive_categories, X_normalized, feature_names):
+    env = Environment(loader=FileSystemLoader('.'))
+    env.filters['mean'] = lambda x: np.mean(x)
+    env.filters['median'] = lambda x: np.median(x)
+    env.filters['min'] = min
+    env.filters['max'] = max
+    
+    template = env.get_template('report_template.html')
+
+    # Fonction pour convertir une table Rich en HTML
+    def table_to_html(table):
+        console = Console(file=StringIO(), force_terminal=False)
+        console.print(table)
+        html = console.file.getvalue()
+        return f"<pre>{html}</pre>"
+
+    summary_table = create_summary_table(categories, exclusive_categories)
+    table_2d = create_2d_table(categories, exclusive_categories)
+    slopes_table = create_slopes_table(results, categories)
+
+    slopes_data = analyze_slopes(results, return_data=True)
+    model_quality_data = analyze_model_quality(results, return_data=True)
+    correlation_data = correlation_matrix(results, feature_names, X_normalized, return_data=True)
+
+    html_content = template.render(
+        date=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        summary_table=table_to_html(summary_table),
+        table_2d=table_to_html(table_2d),
+        slopes_table=table_to_html(slopes_table),
+        slopes_data=slopes_data,
+        model_quality_data=model_quality_data,
+        correlation_data=correlation_data
+    )
+
+    with open('report.html', 'w', encoding='utf-8') as f:
+        f.write(html_content)
+
+    print("Rapport HTML généré avec succès : report.html")
+
 
 
 def main():
@@ -311,6 +373,7 @@ def main():
     console.print(create_slopes_table(results, categories))
     # Appelez cette fonction avec vos résultats
     display_global_analysis(results,auc_data['name'],X_normalized)
+    generate_html_report(results, categories, exclusive_categories, X_normalized, auc_data['name'])
 
 if __name__ == "__main__":
     main()

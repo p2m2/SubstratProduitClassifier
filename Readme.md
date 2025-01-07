@@ -51,7 +51,7 @@ Y = β0 + β1 * X + β2 * X^2 + β3 * X^3 + β4 * niveau_o2 + Σ(βi * cultivar_
 ```bash
 python -m venv env
 source env/bin/activate
-pip install pandas statsmodels scikit-learn tqdm colorama tabulate rich
+pip install pandas statsmodels scikit-learn tqdm colorama tabulate rich jinja2
 ```
 
 ## Exécution
