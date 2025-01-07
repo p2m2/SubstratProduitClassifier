@@ -10,7 +10,6 @@ from rich import box
 from jinja2 import Environment, FileSystemLoader
 import os
 from datetime import datetime
-from rich.console import Console
 from io import StringIO
 
 
@@ -68,10 +67,9 @@ def fit_models(data, y, covariates):
     
     return model_lin, model_quad, model_cubic
 
-def analyze_feature(X_feature, y, sample_metadata, feature_name):
-    data, covariates = create_model_data(X_feature, sample_metadata)
-    model_lin, model_quad, model_cubic = fit_models(data, y, covariates)
-    
+def analyze_feature(X_feature, y, sample_metadata, feature_name, fixed_effects, covariates):
+    data, model_covariates = create_model_data(X_feature, sample_metadata, fixed_effects, covariates)
+    model_lin, model_quad, model_cubic = fit_models(data, y, model_covariates)
     return {
         'Feature': feature_name,
         'P-value_linear': model_lin.pvalues.get('x', None),
@@ -90,6 +88,7 @@ def analyze_feature(X_feature, y, sample_metadata, feature_name):
         'F-statistic_cubic': model_cubic.fvalue,
     }
 
+
 def get_type_feature(res):
     types = []
     if res['P-value_linear'] < 0.05:
@@ -100,18 +99,23 @@ def get_type_feature(res):
         types.append('Recyclé')
     return ','.join(types) if types else 'Non classé'
 
-def analyze_data(X_normalized, y, sample_metadata, feature_names):
+def analyze_data(X_normalized, y, sample_metadata, feature_names, fixed_effects, covariates):
     results = []
     for index in track(range(X_normalized.shape[0]), description="Analysing features"):
-        result = analyze_feature(X_normalized[index], y, sample_metadata, feature_names[index])
+        result = analyze_feature(X_normalized[index], y, sample_metadata, feature_names[index], fixed_effects, covariates)
         result['Type'] = get_type_feature(result)
         results.append(result)
     return results
 
-def save_results(results):
-    pd.DataFrame(results).to_csv('Features_Results.csv', index=False, float_format="%.5f")
-    pd.DataFrame({'Res': [x['Type'] for x in results]}).to_csv('Features_Results_Type.csv', index=False)
 
+def get_features_csv_name(model):
+    suff = '_'.join(model['fixed_effects']) + '_'.join(model['covariates'])
+    return f'Features_Results_Model_{suff}.csv'
+
+def save_results(results, model):
+    pd.DataFrame(results).to_csv(get_features_csv_name(model), index=False, float_format="%.5f")
+    
+    
 def categorize_results(results):
     categories = {
         'produits': [x['Feature'] for x in results if 'Produit' in x['Type']],
@@ -136,11 +140,13 @@ def create_summary_table(categories, exclusive_categories):
     table.add_column("Catégorie", style="cyan")
     table.add_column("Éligible", justify="right")
     table.add_column("Exclusif (1 seule catégorie)", justify="right")
+    count_cat = {}
     
     for cat, exc_cat in zip(categories.items(), exclusive_categories.items()):
         table.add_row(cat[0].capitalize(), str(len(cat[1])), str(len(exc_cat[1])))
+        count_cat[cat[0].capitalize()] = len(cat[1])
     
-    return table
+    return table,count_cat
 
 def create_2d_table(categories, exclusive_categories):
     cat_names = ["Produit", "Substrat", "Transitoire", "Recyclé"]
@@ -300,83 +306,100 @@ def correlation_matrix(results, feature_names,X_normalized,return_data=False):
     console.print(table)
 
 # Dans votre fonction main ou là où vous traitez vos résultats :
-def display_global_analysis(results, feature_names,X_normalized):
-    console.print("[bold]Analyse globale des features[/bold]\n")
-    
-    analyze_slopes(results)
-    console.print()
-    
+def display_global_analysis(results):    
     analyze_model_quality(results)
     console.print()
     
-    correlation_matrix(results, feature_names,X_normalized)
+    #correlation_matrix(results, feature_names,X_normalized)
 
-def generate_html_report(results, categories, exclusive_categories, X_normalized, feature_names, models):
+def generate_html_report(all_results, all_categories, all_exclusive_categories, X_normalized, feature_names, models):
     env = Environment(loader=FileSystemLoader('.'))
     env.filters['mean'] = lambda x: np.mean(x)
     env.filters['median'] = lambda x: np.median(x)
     env.filters['min'] = min
     env.filters['max'] = max
-    
     template = env.get_template('report_template.html')
 
-    # Fonction pour convertir une table Rich en HTML
     def table_to_html(table):
         console = Console(file=StringIO(), force_terminal=False)
         console.print(table)
         html = console.file.getvalue()
         return f"<pre>{html}</pre>"
 
-    summary_table = create_summary_table(categories, exclusive_categories)
-    table_2d = create_2d_table(categories, exclusive_categories)
-    slopes_table = create_slopes_table(results, categories)
-
-    slopes_data = analyze_slopes(results, return_data=True)
-    model_quality_data = analyze_model_quality(results, return_data=True)
-    correlation_data = correlation_matrix(results, feature_names, X_normalized, return_data=True)
+    model_reports = []
+    for i, (results, categories, exclusive_categories, model) in enumerate(zip(all_results, all_categories, all_exclusive_categories, models)):
+        summary_table,count_cat = create_summary_table(categories, exclusive_categories)
+        table_2d = create_2d_table(categories, exclusive_categories)
+        slopes_table = create_slopes_table(results, categories)
+        slopes_data = analyze_slopes(results, return_data=True)
+        model_quality_data = analyze_model_quality(results, return_data=True)
+        correlation_data = correlation_matrix(results, feature_names, X_normalized, return_data=True)
+        
+        model_reports.append({
+            'model_formula' : f"y ~ x + {' + '.join(model['fixed_effects'])} + {' + '.join(model['covariates'])}", 
+            'CSV': get_features_csv_name(model),
+            'fixed_effects': model['fixed_effects'],
+            'covariates': model['covariates'],
+            'summary_table': table_to_html(summary_table),
+            'table_2d': table_to_html(table_2d),
+            'slopes_table': table_to_html(slopes_table),
+            'slopes_data': slopes_data,
+            'model_quality_data': model_quality_data,
+            'correlation_data': correlation_data,
+            'count_cat' : count_cat,
+            'results' : pd.DataFrame(results).drop(columns=[]).to_html(table_id=f"csvTable_{i}")
+        })
 
     html_content = template.render(
         date=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        summary_table=table_to_html(summary_table),
-        table_2d=table_to_html(table_2d),
-        slopes_table=table_to_html(slopes_table),
-        slopes_data=slopes_data,
-        model_quality_data=model_quality_data,
-        correlation_data=correlation_data,
-        models=models
+        models=model_reports
     )
 
-    with open('report.html', 'w', encoding='utf-8') as f:
+    with open('index.html', 'w', encoding='utf-8') as f:
         f.write(html_content)
 
-    print("Rapport HTML généré avec succès : report.html")
-
-
+    print("Rapport HTML généré avec succès !")
 
 def main():
     file_path = 'data-test/data_M2PHENOX_AD_v2.xlsx'
     sample_metadata, auc_data = load_data(file_path)
     X_normalized, y, sample_metadata = preprocess_data(sample_metadata, auc_data)
-    
+
     models = [
+        {'fixed_effects': ['cultivar', 'repeat', 'batch'], 'covariates': []},
+        {'fixed_effects': ['cultivar', 'repeat', 'batch', 'num_prelevement'], 'covariates': []},
         {'fixed_effects': ['cultivar', 'repeat', 'batch'], 'covariates': ['injectionOrder']},
-        {'fixed_effects': ['cultivar', 'repeat', 'batch','num_prelevement'], 'covariates': ['injectionOrder']},
         {'fixed_effects': ['cultivar', 'repeat', 'batch'], 'covariates': ['niveau_o2']},
-        {'fixed_effects': ['cultivar', 'repeat'], 'covariates': ['injectionOrder', 'niveau_o2', 'num_prelevement']},
-        # Ajoutez d'autres modèles selon vos besoins
+        {'fixed_effects': ['cultivar', 'repeat', 'batch', 'num_prelevement'], 'covariates': ['injectionOrder']},
+        {'fixed_effects': ['cultivar', 'repeat', 'batch', 'num_prelevement'], 'covariates': ['niveau_o2']},
+        {'fixed_effects': ['cultivar', 'repeat', 'batch'], 'covariates': ['injectionOrder', 'niveau_o2']},
+        {'fixed_effects': ['cultivar', 'repeat', 'batch', 'num_prelevement'], 'covariates': ['injectionOrder', 'niveau_o2']},
     ]
-    
-    results = analyze_data(X_normalized, y, sample_metadata, auc_data['name'])
-    save_results(results)
-    
-    categories, exclusive_categories = categorize_results(results)
-    
-    console.print(create_summary_table(categories, exclusive_categories))
-    console.print(create_2d_table(categories, exclusive_categories))
-    console.print(create_slopes_table(results, categories))
-    # Appelez cette fonction avec vos résultats
-    display_global_analysis(results,auc_data['name'],X_normalized)
-    generate_html_report(results, categories, exclusive_categories, X_normalized, auc_data['name'])
+
+    all_results = []
+    all_categories = []
+    all_exclusive_categories = []
+
+    for model_index, model in enumerate(models, 1):
+        results = analyze_data(X_normalized, y, sample_metadata, auc_data['name'], model['fixed_effects'], model['covariates'])
+        categories, exclusive_categories = categorize_results(results)
+        if len(results) == 0:
+            console.print(f"Aucune feature significative trouvée pour le modèle {model_index}")
+            continue
+
+        console.print(f"[bold]Model[/bold] : {model}\n")
+        save_results(results, model)
+        console.print(create_summary_table(categories, exclusive_categories))
+        console.print(create_2d_table(categories, exclusive_categories))
+        #console.print(create_slopes_table(results, categories))
+        display_global_analysis(results)
+        
+        all_results.append(results)
+        all_categories.append(categories)
+        all_exclusive_categories.append(exclusive_categories)
+
+    generate_html_report(all_results, all_categories, all_exclusive_categories, X_normalized, auc_data['name'], models)
 
 if __name__ == "__main__":
     main()
+

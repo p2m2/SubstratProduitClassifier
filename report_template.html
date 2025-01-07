@@ -4,6 +4,16 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Rapport d'analyse des features</title>
+    
+    <!-- DataTables CSS -->
+    <link rel="stylesheet" type="text/css" href="https://cdn.datatables.net/1.10.24/css/jquery.dataTables.css">
+    
+    <!-- jQuery -->
+    <script type="text/javascript" charset="utf8" src="https://code.jquery.com/jquery-3.5.1.js"></script>
+    
+    <!-- DataTables JS -->
+    <script type="text/javascript" charset="utf8" src="https://cdn.datatables.net/1.10.24/js/jquery.dataTables.js"></script>
+
     <style>
         body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
         h1, h2 { color: #2c3e50; }
@@ -11,88 +21,145 @@
         th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
         th { background-color: #f2f2f2; }
         .page-break { page-break-before: always; }
+        .hidden { display: none; }
     </style>
+    
+    <script>
+       function toggleModel(modelId) {
+            // Cacher tous les modèles
+            var allModels = document.querySelectorAll('div[id^="model"]');
+            allModels.forEach(function(model) {
+                model.style.display = "none";
+            });
+
+            // Afficher le modèle sélectionné
+            var selectedModel = document.getElementById(modelId);
+            selectedModel.style.display = "block";
+        }
+
+        $(document).ready(function() {
+            $('.dataframe').DataTable(); // Initialiser DataTables pour le tableau CSV
+        });
+    </script>
 </head>
 <body>
+    <small>Généré le : {{ date }}</small>
+    <h1>Summary</h1> 
+    <table border="1" cellpadding="5" cellspacing="0"> 
+        <thead> 
+            <tr> 
+                <th>Model</th>
+                <th>Fixed Effects</th> 
+                <th>Covariates</th> 
+                <th>R² moyen (linear)</th> 
+                <th>F-statistique moyenne</th>
+                {% set first_model = models[0] %} 
+                {% for category in first_model.count_cat.keys() %} 
+                <th>{{ category|capitalize }}</th> 
+                {% endfor %} 
+            </tr> 
+        </thead> 
+        <tbody> 
+            {% set sorted_models = models|sort(attribute='model_quality_data.r_squared.linear|mean', reverse=True) %} 
+            {% for model in sorted_models %} 
+            <tr> 
+                <td><a href="#" onclick="toggleModel('model{{ loop.index }}'); return false;">{{ model.model_formula|safe }}</a></td> 
+                <td>{{ model.fixed_effects|join(', ') }}</td> 
+                <td>{{ model.covariates|join(', ') }}</td> 
+                <td>{{ '%.4f'|format(model.model_quality_data['r_squared']['linear']|mean) }}</td> 
+                <td>{{ '%.4f'|format(model.model_quality_data['f_statistic']['linear']|mean) }}</td> 
+                {% for category, count in model.count_cat.items() %} 
+                <td>{{ count }}</td> 
+                {% endfor %} 
+            </tr>
+            {% endfor %} 
+        </tbody> 
+    </table>
+
     {% for model in models %}
-    <div class="page-break">
-        <h1>Rapport d'analyse des features - Modèle {{ loop.index }}</h1>
-        <p>Généré le : {{ date }}</p>
+    <div id="model{{ loop.index }}" class="hidden">
+        <div class="page-break">
+            <h2>{{ model.model_formula|safe }}</h2>
 
-        <h2>Modèle</h2>
-        <p><strong>Effets fixes :</strong> {{ model.fixed_effects|join(', ') }}</p>
-        <p><strong>Covariables :</strong> {{ model.covariates|join(', ') }}</p>
+            <h3>Modèle</h3>
+            <p><strong>Effets fixes :</strong> {{ model.fixed_effects|join(', ') }}</p>
+            <p><strong>Covariables :</strong> {{ model.covariates|join(', ') }}</p>
 
-        <h1>Rapport d'analyse des features</h1>
-        <p>Généré le : {{ date }}</p>
+            <h3>Résumé des Résultats</h3>
+            {{ model.summary_table|safe }}
 
-        <h2>Résumé des Résultats</h2>
-        {{ summary_table|safe }}
+            <h3>Tableau 2D des catégories</h3>
+            {{ model.table_2d|safe }}
 
-        <h2>Tableau 2D des catégories</h2>
-        {{ table_2d|safe }}
+            <h3>Tableau des pentes par catégorie</h3>
+            {{ model.slopes_table|safe }}
 
-        <h2>Tableau des pentes par catégorie</h2>
-        {{ slopes_table|safe }}
-
-        <h2>Distribution des valeurs de pente</h2>
-        <table>
-            <tr>
-                <th>Statistique</th>
-                <th>Linéaire</th>
-                <th>Quadratique</th>
-                <th>Cubique</th>
-            </tr>
-            {% for stat in ['Min', 'Max', 'Moyenne', 'Médiane'] %}
-            <tr>
-                <td>{{ stat }}</td>
-                <td>{{ '%.4f'|format(slopes_data['linear']|min if stat == 'Min' else slopes_data['linear']|max if stat == 'Max' else slopes_data['linear']|mean if stat == 'Moyenne' else slopes_data['linear']|median) }}</td>
-                <td>{{ '%.4f'|format(slopes_data['quadratic']|min if stat == 'Min' else slopes_data['quadratic']|max if stat == 'Max' else slopes_data['quadratic']|mean if stat == 'Moyenne' else slopes_data['quadratic']|median) }}</td>
-                <td>{{ '%.4f'|format(slopes_data['cubic']|min if stat == 'Min' else slopes_data['cubic']|max if stat == 'Max' else slopes_data['cubic']|mean if stat == 'Moyenne' else slopes_data['cubic']|median) }}</td>
-            </tr>
-            {% endfor %}
-        </table>
-
-        <h2>Qualité des modèles</h2>
-        <table>
-            <tr>
-                <th>Métrique</th>
-                <th>Linéaire</th>
-                <th>Quadratique</th>
-                <th>Cubique</th>
-            </tr>
-            <tr>
-                <td>R² moyen</td>
-                <td>{{ '%.4f'|format(model_quality_data['r_squared']['linear']|mean) }}</td>
-                <td>{{ '%.4f'|format(model_quality_data['r_squared']['quadratic']|mean) }}</td>
-                <td>{{ '%.4f'|format(model_quality_data['r_squared']['cubic']|mean) }}</td>
-            </tr>
-            <tr>
-                <td>F-statistique moyenne</td>
-                <td>{{ '%.4f'|format(model_quality_data['f_statistic']['linear']|mean) }}</td>
-                <td>{{ '%.4f'|format(model_quality_data['f_statistic']['quadratic']|mean) }}</td>
-                <td>{{ '%.4f'|format(model_quality_data['f_statistic']['cubic']|mean) }}</td>
-            </tr>
-        </table>
-
-        <h2>Matrice de corrélation des features les plus significatives</h2>
-        <table>
-            <tr>
-                <th>Feature</th>
-                {% for feature in correlation_data.keys() %}
-                <th>{{ feature }}</th>
+            <h3>Distribution des valeurs de pente</h3>
+            <table>
+                <tr>
+                    <th>Statistique</th>
+                    <th>Linéaire</th>
+                    <th>Quadratique</th>
+                    <th>Cubique</th>
+                </tr>
+                {% for stat in ['Min', 'Max', 'Moyenne', 'Médiane'] %}
+                <tr>
+                    <td>{{ stat }}</td>
+                    <td>{{ '%.4f'|format(model.slopes_data['linear']|min if stat == 'Min' else model.slopes_data['linear']|max if stat == 'Max' else model.slopes_data['linear']|mean if stat == 'Moyenne' else model.slopes_data['linear']|median) }}</td>
+                    <td>{{ '%.4f'|format(model.slopes_data['quadratic']|min if stat == 'Min' else model.slopes_data['quadratic']|max if stat == 'Max' else model.slopes_data['quadratic']|mean if stat == 'Moyenne' else model.slopes_data['quadratic']|median) }}</td>
+                    <td>{{ '%.4f'|format(model.slopes_data['cubic']|min if stat == 'Min' else model.slopes_data['cubic']|max if stat == 'Max' else model.slopes_data['cubic']|mean if stat == 'Moyenne' else model.slopes_data['cubic']|median) }}</td>
+                </tr>
                 {% endfor %}
-            </tr>
-            {% for feature, values in correlation_data.items() %}
-            <tr>
-                <td>{{ feature }}</td>
-                {% for value in values.values() %}
-                <td>{{ '%.2f'|format(value) }}</td>
+            </table>
+
+            <h3>Qualité des modèles</h3>
+            <table>
+                <tr>
+                    <th>Métrique</th>
+                    <th>Linéaire</th>
+                    <th>Quadratique</th>
+                    <th>Cubique</th>
+                </tr>
+                <tr>
+                    <td>R² moyen</td>
+                    <td>{{ '%.4f'|format(model.model_quality_data['r_squared']['linear']|mean) }}</td>
+                    <td>{{ '%.4f'|format(model.model_quality_data['r_squared']['quadratic']|mean) }}</td>
+                    <td>{{ '%.4f'|format(model.model_quality_data['r_squared']['cubic']|mean) }}</td>
+                </tr>
+                <tr>
+                    <td>F-statistique moyenne</td>
+                    <td>{{ '%.4f'|format(model.model_quality_data['f_statistic']['linear']|mean) }}</td>
+                    <td>{{ '%.4f'|format(model.model_quality_data['f_statistic']['quadratic']|mean) }}</td>
+                    <td>{{ '%.4f'|format(model.model_quality_data['f_statistic']['cubic']|mean) }}</td>
+                </tr>
+            </table>
+
+            <h3>Matrice de corrélation des features les plus significatives</h3>
+            <table>
+                <tr>
+                    <th>Feature</th>
+                    {% for feature in model.correlation_data.keys() %}
+                    <th>{{ feature }}</th>
+                    {% endfor %}
+                </tr>
+                {% for feature, values in model.correlation_data.items() %}
+                <tr>
+                    <td>{{ feature }}</td>
+                    {% for value in values.values() %}
+                    <td>{{ '%.2f'|format(value) }}</td>
+                    {% endfor %}
+                </tr>
                 {% endfor %}
-            </tr>
-            {% endfor %}
-        </table>
+            </table>
+        </div>
+
+        <h3> Features </h3>
+        <a href="{{model.CSV}}" download>CSV</a>
+        <br/>
+        {{ model.results }}
     </div>
+    
     {% endfor %}
+
 </body>
 </html>
