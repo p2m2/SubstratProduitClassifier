@@ -1,6 +1,6 @@
 # Analyse des Features avec Régression Linéaire, Quadratique et Cubique
 
-[![GitHub Pages](https://img.shields.io/website?url=https://p2m2.github.io/SubstratProduitClassifier)](https://p2m2.github.io/SubstratProduitClassifier)
+[![GitHub Pages](https://img.shields.io/website?url=https://p2m2.github.io/SubstratProduitClassifier)](https://p2m2.github.io/SubstratProduitClassifier/index.html)
 
 Ce programme permet d'analyser des features issues de données expérimentales en utilisant des modèles de régression linéaire, quadratique et cubique pour prédire le cumul d'oxygène (cumul_O2) en tant que variable dépendante (y). Les analyses sont effectuées en quatre paquets distincts, chacun correspondant à un type de relation entre les features et le cumul_O2 :
 
