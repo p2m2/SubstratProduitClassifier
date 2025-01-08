@@ -3,6 +3,7 @@ import numpy as np
 from numpy import median
 from sklearn.preprocessing import StandardScaler
 from statsmodels.api import add_constant, OLS
+from statsmodels.stats import multitest
 from rich.console import Console
 from rich.table import Table
 from rich.progress import track
@@ -24,19 +25,21 @@ def load_data(file_path):
 def preprocess_data(sample_metadata, auc_data):
     scaler = StandardScaler()
     
-    columns_to_scale = ['injectionOrder', 'vol_O2', 'num_prelevement', 'cumul_O2']
-    sample_metadata[columns_to_scale] = scaler.fit_transform(sample_metadata[columns_to_scale])
+    #columns_to_scale = ['injectionOrder', 'vol_O2', 'num_prelevement', 'cumul_O2']
+    #sample_metadata[columns_to_scale] = scaler.fit_transform(sample_metadata[columns_to_scale])
     
-    y = sample_metadata['cumul_O2']
-    X = auc_data.drop(columns=['name'])
-    X_normalized = scaler.fit_transform(X)
+    X = sample_metadata['cumul_O2']  # This is now the explanatory variable
     
-    return X_normalized, y, sample_metadata
+    y_all = auc_data.drop(columns=['name'])
+    y_all = scaler.fit_transform(y_all)  # This is now the response variable
+    
+    return X, y_all, sample_metadata
 
-def create_model_data(X_feature, sample_metadata, fixed_effects, covariates):
+
+def create_model_data(X_feature, y, sample_metadata, fixed_effects, covariates):
     data = pd.DataFrame({
         'x': X_feature,
-        'y': sample_metadata['cumul_O2'],
+        'y': y,
     })
     
     for effect in fixed_effects:
@@ -68,8 +71,9 @@ def fit_models(data, y, covariates):
     return model_lin, model_quad, model_cubic
 
 def analyze_feature(X_feature, y, sample_metadata, feature_name, fixed_effects, covariates):
-    data, model_covariates = create_model_data(X_feature, sample_metadata, fixed_effects, covariates)
+    data, model_covariates = create_model_data(X_feature, y, sample_metadata, fixed_effects, covariates)
     model_lin, model_quad, model_cubic = fit_models(data, y, model_covariates)
+    
     return {
         'Feature': feature_name,
         'P-value_linear': model_lin.pvalues.get('x', None),
@@ -99,12 +103,27 @@ def get_type_feature(res):
         types.append('Recyclé')
     return ','.join(types) if types else 'Non classé'
 
-def analyze_data(X_normalized, y, sample_metadata, feature_names, fixed_effects, covariates):
+def analyze_data(X, y_all, sample_metadata, feature_names, fixed_effects, covariates):
     results = []
-    for index in track(range(X_normalized.shape[0]), description="Analysing features"):
-        result = analyze_feature(X_normalized[index], y, sample_metadata, feature_names[index], fixed_effects, covariates)
-        result['Type'] = get_type_feature(result)
+    for index in track(range(y_all.shape[0]), description="Analysing features"):
+        result = analyze_feature(X, y_all[index], sample_metadata, feature_names[index], fixed_effects, covariates)
         results.append(result)
+    
+    if False:
+        fdr = multitest.fdrcorrection([x['P-value_linear'] for x in results], method='indep')[1]
+        for i in range(len(results)):
+            results[i]['P-value_linear']=fdr[i]
+        
+        fdr = multitest.fdrcorrection([x['P-value_quadratic'] for x in results], method='indep')[1]
+        for i in range(len(results)):
+            results[i]['P-value_quadratic']=fdr[i]
+        fdr = multitest.fdrcorrection([x['P-value_cubic'] for x in results], method='indep')[1]
+        for i in range(len(results)):
+            results[i]['P-value_cubic']=fdr[i]
+            
+    for i in range(len(results)):
+        results[i]['Type'] = get_type_feature(results[i]) 
+    
     return results
 
 
@@ -255,6 +274,11 @@ def analyze_model_quality(results, return_data=False):
         'quadratic': [r['F-statistic_quadratic'] for r in results],
         'cubic': [r['F-statistic_cubic'] for r in results]
     }
+    p_value = {
+        'linear': [r['P-value_linear'] for r in results],
+        'quadratic': [r['P-value_quadratic'] for r in results],
+        'cubic': [r['P-value_cubic'] for r in results]
+    }
     
     table = Table(title="Qualité des modèles", box=box.MINIMAL_DOUBLE_HEAD)
     table.add_column("Métrique", style="cyan")
@@ -272,21 +296,27 @@ def analyze_model_quality(results, return_data=False):
                   f"{np.mean(f_statistic['quadratic']):.4f}",
                   f"{np.mean(f_statistic['cubic']):.4f}")
     
+    table.add_row("P-value moyenne", 
+                  f"{np.mean(p_value['linear']):.4f}",
+                  f"{np.mean(p_value['quadratic']):.4f}",
+                  f"{np.mean(p_value['cubic']):.4f}")
+    
     if return_data:
         return {
             'r_squared': r_squared,
-            'f_statistic': f_statistic
+            'f_statistic': f_statistic,
+            'p_value': p_value
         }
         
     console.print(table)
 
-def correlation_matrix(results, feature_names,X_normalized,return_data=False):
+def correlation_matrix(results, feature_names,y_all,return_data=False):
     # Sélectionner les features les plus significatives (par exemple, top 10 avec le R² le plus élevé)
     top_features = sorted(results, key=lambda x: x['R2_linear'], reverse=True)[:10]
     feature_names_list = feature_names.tolist() if hasattr(feature_names, 'tolist') else feature_names
     
     # Créer un DataFrame avec les valeurs de ces features
-    df = pd.DataFrame({r['Feature']: X_normalized[feature_names_list.index(r['Feature'],)] for r in top_features})
+    df = pd.DataFrame({r['Feature']: y_all[feature_names_list.index(r['Feature'],)] for r in top_features})
     
     # Calculer la matrice de corrélation
     corr_matrix = df.corr()
@@ -310,9 +340,7 @@ def display_global_analysis(results):
     analyze_model_quality(results)
     console.print()
     
-    #correlation_matrix(results, feature_names,X_normalized)
-
-def generate_html_report(all_results, all_categories, all_exclusive_categories, X_normalized, feature_names, models):
+def generate_html_report(all_results, all_categories, all_exclusive_categories, y_all, feature_names, models):
     env = Environment(loader=FileSystemLoader('.'))
     env.filters['mean'] = lambda x: np.mean(x)
     env.filters['median'] = lambda x: np.median(x)
@@ -333,7 +361,7 @@ def generate_html_report(all_results, all_categories, all_exclusive_categories, 
         slopes_table = create_slopes_table(results, categories)
         slopes_data = analyze_slopes(results, return_data=True)
         model_quality_data = analyze_model_quality(results, return_data=True)
-        correlation_data = correlation_matrix(results, feature_names, X_normalized, return_data=True)
+        correlation_data = correlation_matrix(results, feature_names, y_all, return_data=True)
         
         model_reports.append({
             'model_formula' : f"y ~ x + {' + '.join(model['fixed_effects'])} + {' + '.join(model['covariates'])}", 
@@ -363,17 +391,17 @@ def generate_html_report(all_results, all_categories, all_exclusive_categories, 
 def main():
     file_path = 'data-test/data_M2PHENOX_AD_v2.xlsx'
     sample_metadata, auc_data = load_data(file_path)
-    X_normalized, y, sample_metadata = preprocess_data(sample_metadata, auc_data)
+    X, y_all, sample_metadata = preprocess_data(sample_metadata, auc_data)
 
     models = [
-        {'fixed_effects': ['cultivar', 'repeat', 'batch'], 'covariates': []},
-        {'fixed_effects': ['cultivar', 'repeat', 'batch', 'num_prelevement'], 'covariates': []},
-        {'fixed_effects': ['cultivar', 'repeat', 'batch'], 'covariates': ['injectionOrder']},
-        {'fixed_effects': ['cultivar', 'repeat', 'batch'], 'covariates': ['niveau_o2']},
-        {'fixed_effects': ['cultivar', 'repeat', 'batch', 'num_prelevement'], 'covariates': ['injectionOrder']},
-        {'fixed_effects': ['cultivar', 'repeat', 'batch', 'num_prelevement'], 'covariates': ['niveau_o2']},
-        {'fixed_effects': ['cultivar', 'repeat', 'batch'], 'covariates': ['injectionOrder', 'niveau_o2']},
-        {'fixed_effects': ['cultivar', 'repeat', 'batch', 'num_prelevement'], 'covariates': ['injectionOrder', 'niveau_o2']},
+       {'fixed_effects': ['cultivar', 'repeat', 'batch'], 'covariates': []},
+       {'fixed_effects': ['cultivar', 'repeat', 'batch', 'num_prelevement'], 'covariates': []},
+       {'fixed_effects': ['cultivar', 'repeat', 'batch'], 'covariates': ['injectionOrder']},
+      # {'fixed_effects': ['cultivar', 'repeat', 'batch'], 'covariates': ['niveau_o2']},
+       {'fixed_effects': ['cultivar', 'repeat', 'batch', 'num_prelevement'], 'covariates': ['injectionOrder']},
+      # {'fixed_effects': ['cultivar', 'repeat', 'batch', 'num_prelevement'], 'covariates': ['niveau_o2']},
+      # {'fixed_effects': ['cultivar', 'repeat', 'batch'], 'covariates': ['injectionOrder', 'niveau_o2']},
+    # {'fixed_effects': ['cultivar', 'repeat', 'batch', 'num_prelevement'], 'covariates': ['injectionOrder', 'niveau_o2']},
     ]
 
     all_results = []
@@ -381,7 +409,7 @@ def main():
     all_exclusive_categories = []
 
     for model_index, model in enumerate(models, 1):
-        results = analyze_data(X_normalized, y, sample_metadata, auc_data['name'], model['fixed_effects'], model['covariates'])
+        results = analyze_data(X, y_all, sample_metadata, auc_data['name'], model['fixed_effects'], model['covariates'])
         categories, exclusive_categories = categorize_results(results)
         if len(results) == 0:
             console.print(f"Aucune feature significative trouvée pour le modèle {model_index}")
@@ -398,7 +426,7 @@ def main():
         all_categories.append(categories)
         all_exclusive_categories.append(exclusive_categories)
 
-    generate_html_report(all_results, all_categories, all_exclusive_categories, X_normalized, auc_data['name'], models)
+    generate_html_report(all_results, all_categories, all_exclusive_categories, y_all, auc_data['name'], models)
 
 if __name__ == "__main__":
     main()

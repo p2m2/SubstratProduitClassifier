@@ -51,8 +51,9 @@
                 <th>Model</th>
                 <th>Fixed Effects</th> 
                 <th>Covariates</th> 
-                <th>R² moyen (linear)</th> 
-                <th>F-statistique moyenne</th>
+                <th>R² moyen (linear)</th>
+                <th>F statistic moyen (linear)</th> 
+                <th>P-value moyenne (linear)</th>
                 {% set first_model = models[0] %} 
                 {% for category in first_model.count_cat.keys() %} 
                 <th>{{ category|capitalize }}</th> 
@@ -68,6 +69,7 @@
                 <td>{{ model.covariates|join(', ') }}</td> 
                 <td>{{ '%.4f'|format(model.model_quality_data['r_squared']['linear']|mean) }}</td> 
                 <td>{{ '%.4f'|format(model.model_quality_data['f_statistic']['linear']|mean) }}</td> 
+                <td>{{ '%.4f'|format(model.model_quality_data['p_value']['linear']|mean) }}</td> 
                 {% for category, count in model.count_cat.items() %} 
                 <td>{{ count }}</td> 
                 {% endfor %} 
@@ -125,6 +127,12 @@
                     <td>{{ '%.4f'|format(model.model_quality_data['r_squared']['linear']|mean) }}</td>
                     <td>{{ '%.4f'|format(model.model_quality_data['r_squared']['quadratic']|mean) }}</td>
                     <td>{{ '%.4f'|format(model.model_quality_data['r_squared']['cubic']|mean) }}</td>
+                </tr>
+                <tr>
+                    <td>F-statistique moyenne</td>
+                    <td>{{ '%.4f'|format(model.model_quality_data['p_value']['linear']|mean) }}</td>
+                    <td>{{ '%.4f'|format(model.model_quality_data['p_value']['quadratic']|mean) }}</td>
+                    <td>{{ '%.4f'|format(model.model_quality_data['p_value']['cubic']|mean) }}</td>
                 </tr>
                 <tr>
                     <td>F-statistique moyenne</td>
